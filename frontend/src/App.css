@@ -1,0 +1,108 @@
+
+.app {
+  min-height: 100vh;
+  background: #f3f6fb;
+}
+
+.header {
+  background: #173b68;
+  color: white;
+  padding: 24px 40px;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.header p {
+  margin: 5px 0 0;
+  color: #d5e4f5;
+}
+
+.container {
+  max-width: 480px;
+  margin: 60px auto;
+  background: white;
+  padding: 35px;
+  border-radius: 12px;
+  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.06);
+}
+
+.container h2 {
+  color: #173b68;
+  margin-top: 0;
+}
+
+.description {
+  color: #666;
+  margin-bottom: 30px;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+input {
+  width: 100%;
+  padding: 12px;
+  box-sizing: border-box;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 15px;
+}
+
+input:focus {
+  outline: 2px solid #3b82f6;
+  outline-offset: 1px;
+}
+
+button {
+  width: 100%;
+  padding: 13px;
+  background: #173b68;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #24558a;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.message {
+  margin-top: 20px;
+  padding: 12px;
+  background: #edf4ff;
+  border-radius: 6px;
+}
+
+.field-error {
+  color: #dc2626;
+  font-size: 13px;
+  margin-top: 6px;
+}
+
+@media (max-width: 600px) {
+  .header {
+    padding: 20px;
+  }
+
+  .container {
+    margin: 24px 16px;
+    padding: 24px;
+  }
+}

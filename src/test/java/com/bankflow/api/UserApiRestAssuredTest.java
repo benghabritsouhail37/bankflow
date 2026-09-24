@@ -532,4 +532,5 @@ void shouldReturn400WhenRequestBodyIsEmpty() {
     .then()
             .statusCode(400);
 }
+
 }
