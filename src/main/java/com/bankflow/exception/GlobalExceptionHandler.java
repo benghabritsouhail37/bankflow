@@ -6,6 +6,8 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.http.ResponseEntity;
 
 import java.util.Map;
 import java.util.TreeMap;
@@ -69,4 +71,21 @@ public class GlobalExceptionHandler {
 
         return problem;
     }
+    
+@ExceptionHandler(HttpMessageNotReadableException.class)
+public ResponseEntity<ProblemDetail> handleUnreadableRequest(
+        HttpMessageNotReadableException exception) {
+
+    ProblemDetail problem =
+            ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
+
+    problem.setTitle("Invalid request");
+    problem.setDetail(
+            "The request body is missing or contains invalid values"
+    );
+
+    return ResponseEntity
+            .status(HttpStatus.BAD_REQUEST)
+            .body(problem);
+}
 }
