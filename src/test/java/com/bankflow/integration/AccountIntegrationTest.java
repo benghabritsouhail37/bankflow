@@ -18,6 +18,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
+
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
@@ -27,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -322,5 +324,678 @@ void shouldReturn400AndNotCreateAccountWhenCurrencyIsInvalid() throws Exception 
             accountsBefore,
             accountsAfter
     );
+}
+// =========================================================
+// DEPOSIT INTEGRATION TEST 1
+// Dépôt réussi
+// =========================================================
+
+@Test
+void shouldDepositMoneyAndUpdateBalanceInDatabase() throws Exception {
+
+    // GIVEN : utilisateur réel
+    User user = new User();
+    user.setFirstName("Deposit");
+    user.setLastName("Integration");
+    user.setEmail(
+            "deposit-" + UUID.randomUUID() + "@example.com"
+    );
+
+    User savedUser = userRepository.save(user);
+
+    // Compte réel avec 100 MAD
+    Account account = new Account();
+    account.setAccountNumber(
+            "BF-" + UUID.randomUUID()
+                    .toString()
+                    .replace("-", "")
+                    .toUpperCase()
+    );
+    account.setBalance(new BigDecimal("100.00"));
+    account.setCurrency(AccountCurrency.MAD);
+    account.setStatus(AccountStatus.ACTIVE);
+    account.setUser(savedUser);
+
+    Account savedAccount =
+            accountRepository.save(account);
+
+
+    // WHEN : dépôt de 50 MAD
+    mockMvc.perform(
+                    post(
+                            "/api/accounts/"
+                                    + savedAccount.getId()
+                                    + "/deposit"
+                    )
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "amount": 50.00
+                                    }
+                                    """)
+            )
+
+            // THEN : réponse API
+            .andExpect(status().isOk())
+            .andExpect(
+                    jsonPath("$.balance")
+                            .value(150.00)
+            )
+            .andExpect(
+                    jsonPath("$.currency")
+                            .value("MAD")
+            )
+            .andExpect(
+                    jsonPath("$.status")
+                            .value("ACTIVE")
+            );
+
+
+    // Vérification PostgreSQL
+    Account updatedAccount =
+            accountRepository
+                    .findById(savedAccount.getId())
+                    .orElseThrow();
+
+    assertEquals(
+            0,
+            new BigDecimal("150.00")
+                    .compareTo(updatedAccount.getBalance())
+    );
+}
+@Test
+void shouldReturn404WhenDepositingIntoNonExistingAccount()
+        throws Exception {
+
+    long accountCountBefore =
+            accountRepository.count();
+
+    mockMvc.perform(
+                    post(
+                            "/api/accounts/"
+                                    + Long.MAX_VALUE
+                                    + "/deposit"
+                    )
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "amount": 50.00
+                                    }
+                                    """)
+            )
+            .andExpect(status().isNotFound())
+            .andExpect(
+                    jsonPath("$.title")
+                            .value("Account not found")
+            )
+            .andExpect(
+                    jsonPath("$.status")
+                            .value(404)
+            );
+
+    assertEquals(
+            accountCountBefore,
+            accountRepository.count()
+    );
+}
+@Test
+void shouldReturn400AndKeepBalanceWhenDepositAmountIsZero()
+        throws Exception {
+
+    User user = new User();
+    user.setFirstName("Zero");
+    user.setLastName("Deposit");
+    user.setEmail(
+            "zero-" + UUID.randomUUID() + "@example.com"
+    );
+
+    User savedUser = userRepository.save(user);
+
+
+    Account account = new Account();
+    account.setAccountNumber(
+            "BF-" + UUID.randomUUID()
+                    .toString()
+                    .replace("-", "")
+                    .toUpperCase()
+    );
+    account.setBalance(new BigDecimal("100.00"));
+    account.setCurrency(AccountCurrency.MAD);
+    account.setStatus(AccountStatus.ACTIVE);
+    account.setUser(savedUser);
+
+    Account savedAccount =
+            accountRepository.save(account);
+
+
+    mockMvc.perform(
+                    post(
+                            "/api/accounts/"
+                                    + savedAccount.getId()
+                                    + "/deposit"
+                    )
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "amount": 0
+                                    }
+                                    """)
+            )
+            .andExpect(status().isBadRequest())
+            .andExpect(
+                    jsonPath("$.errors.amount")
+                            .value(
+                                    "Amount must be greater than 0"
+                            )
+            );
+
+
+    Account unchangedAccount =
+            accountRepository
+                    .findById(savedAccount.getId())
+                    .orElseThrow();
+
+    assertEquals(
+            0,
+            new BigDecimal("100.00")
+                    .compareTo(unchangedAccount.getBalance())
+    );
+}
+@Test
+void shouldReturn409AndKeepBalanceWhenAccountIsBlocked()
+        throws Exception {
+
+    User user = new User();
+    user.setFirstName("Blocked");
+    user.setLastName("Deposit");
+    user.setEmail(
+            "blocked-" + UUID.randomUUID() + "@example.com"
+    );
+
+    User savedUser = userRepository.save(user);
+
+
+    Account account = new Account();
+    account.setAccountNumber(
+            "BF-" + UUID.randomUUID()
+                    .toString()
+                    .replace("-", "")
+                    .toUpperCase()
+    );
+    account.setBalance(new BigDecimal("100.00"));
+    account.setCurrency(AccountCurrency.MAD);
+    account.setStatus(AccountStatus.BLOCKED);
+    account.setUser(savedUser);
+
+    Account savedAccount =
+            accountRepository.save(account);
+
+
+    mockMvc.perform(
+                    post(
+                            "/api/accounts/"
+                                    + savedAccount.getId()
+                                    + "/deposit"
+                    )
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "amount": 50.00
+                                    }
+                                    """)
+            )
+            .andExpect(status().isConflict())
+            .andExpect(
+                    jsonPath("$.title")
+                            .value("Account blocked")
+            )
+            .andExpect(
+                    jsonPath("$.status")
+                            .value(409)
+            );
+
+
+    Account unchangedAccount =
+            accountRepository
+                    .findById(savedAccount.getId())
+                    .orElseThrow();
+
+    assertEquals(
+            0,
+            new BigDecimal("100.00")
+                    .compareTo(unchangedAccount.getBalance())
+    );
+}
+// =========================================================
+// WITHDRAWAL INTEGRATION TEST 1
+// Retrait réussi
+// =========================================================
+
+@Test
+void shouldWithdrawMoneyAndUpdateBalanceInDatabase() throws Exception {
+
+    User user = new User();
+    user.setFirstName("Withdraw");
+    user.setLastName("Integration");
+    user.setEmail(
+            "withdraw-" + UUID.randomUUID() + "@example.com"
+    );
+
+    User savedUser = userRepository.save(user);
+
+    Account account = new Account();
+    account.setAccountNumber(
+            "BF-" + UUID.randomUUID()
+                    .toString()
+                    .replace("-", "")
+                    .toUpperCase()
+    );
+    account.setBalance(new BigDecimal("500.00"));
+    account.setCurrency(AccountCurrency.MAD);
+    account.setStatus(AccountStatus.ACTIVE);
+    account.setUser(savedUser);
+
+    Account savedAccount =
+            accountRepository.save(account);
+
+    mockMvc.perform(
+                    post(
+                            "/api/accounts/"
+                                    + savedAccount.getId()
+                                    + "/withdraw"
+                    )
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "amount": 200.00
+                                    }
+                                    """)
+            )
+            .andExpect(status().isOk())
+            .andExpect(
+                    jsonPath("$.balance")
+                            .value(300.00)
+            )
+            .andExpect(
+                    jsonPath("$.status")
+                            .value("ACTIVE")
+            );
+
+    Account updatedAccount =
+            accountRepository
+                    .findById(savedAccount.getId())
+                    .orElseThrow();
+
+    assertEquals(
+            0,
+            new BigDecimal("300.00")
+                    .compareTo(updatedAccount.getBalance())
+    );
+}
+// =========================================================
+// WITHDRAWAL INTEGRATION TEST 2
+// Compte inexistant
+// =========================================================
+
+@Test
+void shouldReturn404WhenWithdrawingFromNonExistingAccount()
+        throws Exception {
+
+    long accountsBefore =
+            accountRepository.count();
+
+    mockMvc.perform(
+                    post(
+                            "/api/accounts/"
+                                    + Long.MAX_VALUE
+                                    + "/withdraw"
+                    )
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "amount": 50.00
+                                    }
+                                    """)
+            )
+            .andExpect(status().isNotFound())
+            .andExpect(
+                    jsonPath("$.title")
+                            .value("Account not found")
+            )
+            .andExpect(
+                    jsonPath("$.status")
+                            .value(404)
+            );
+
+    assertEquals(
+            accountsBefore,
+            accountRepository.count()
+    );
+}
+// =========================================================
+// WITHDRAWAL INTEGRATION TEST 3
+// Montant zéro
+// =========================================================
+
+@Test
+void shouldReturn400AndKeepBalanceWhenWithdrawalAmountIsZero()
+        throws Exception {
+
+    User user = new User();
+    user.setFirstName("Zero");
+    user.setLastName("Withdrawal");
+    user.setEmail(
+            "zero-withdraw-"
+                    + UUID.randomUUID()
+                    + "@example.com"
+    );
+
+    User savedUser = userRepository.save(user);
+
+    Account account = new Account();
+    account.setAccountNumber(
+            "BF-" + UUID.randomUUID()
+                    .toString()
+                    .replace("-", "")
+                    .toUpperCase()
+    );
+    account.setBalance(new BigDecimal("500.00"));
+    account.setCurrency(AccountCurrency.MAD);
+    account.setStatus(AccountStatus.ACTIVE);
+    account.setUser(savedUser);
+
+    Account savedAccount =
+            accountRepository.save(account);
+
+    mockMvc.perform(
+                    post(
+                            "/api/accounts/"
+                                    + savedAccount.getId()
+                                    + "/withdraw"
+                    )
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "amount": 0
+                                    }
+                                    """)
+            )
+            .andExpect(status().isBadRequest())
+            .andExpect(
+                    jsonPath("$.errors.amount")
+                            .value(
+                                    "Amount must be greater than 0"
+                            )
+            );
+
+    Account unchangedAccount =
+            accountRepository
+                    .findById(savedAccount.getId())
+                    .orElseThrow();
+
+    assertEquals(
+            0,
+            new BigDecimal("500.00")
+                    .compareTo(unchangedAccount.getBalance())
+    );
+}
+// =========================================================
+// WITHDRAWAL INTEGRATION TEST 4
+// Compte bloqué
+// =========================================================
+
+@Test
+void shouldReturn409AndKeepBalanceWhenWithdrawingFromBlockedAccount()
+        throws Exception {
+
+    User user = new User();
+    user.setFirstName("Blocked");
+    user.setLastName("Withdrawal");
+    user.setEmail(
+            "blocked-withdraw-"
+                    + UUID.randomUUID()
+                    + "@example.com"
+    );
+
+    User savedUser = userRepository.save(user);
+
+    Account account = new Account();
+    account.setAccountNumber(
+            "BF-" + UUID.randomUUID()
+                    .toString()
+                    .replace("-", "")
+                    .toUpperCase()
+    );
+    account.setBalance(new BigDecimal("500.00"));
+    account.setCurrency(AccountCurrency.MAD);
+    account.setStatus(AccountStatus.BLOCKED);
+    account.setUser(savedUser);
+
+    Account savedAccount =
+            accountRepository.save(account);
+
+    mockMvc.perform(
+                    post(
+                            "/api/accounts/"
+                                    + savedAccount.getId()
+                                    + "/withdraw"
+                    )
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "amount": 50.00
+                                    }
+                                    """)
+            )
+            .andExpect(status().isConflict())
+            .andExpect(
+                    jsonPath("$.title")
+                            .value("Account blocked")
+            );
+
+    Account unchangedAccount =
+            accountRepository
+                    .findById(savedAccount.getId())
+                    .orElseThrow();
+
+    assertEquals(
+            0,
+            new BigDecimal("500.00")
+                    .compareTo(unchangedAccount.getBalance())
+    );
+}
+// =========================================================
+// WITHDRAWAL INTEGRATION TEST 5
+// Solde insuffisant
+// =========================================================
+
+@Test
+void shouldReturn409AndKeepBalanceWhenFundsAreInsufficient()
+        throws Exception {
+
+    User user = new User();
+    user.setFirstName("Insufficient");
+    user.setLastName("Funds");
+    user.setEmail(
+            "insufficient-"
+                    + UUID.randomUUID()
+                    + "@example.com"
+    );
+
+    User savedUser = userRepository.save(user);
+
+    Account account = new Account();
+    account.setAccountNumber(
+            "BF-" + UUID.randomUUID()
+                    .toString()
+                    .replace("-", "")
+                    .toUpperCase()
+    );
+    account.setBalance(new BigDecimal("100.00"));
+    account.setCurrency(AccountCurrency.MAD);
+    account.setStatus(AccountStatus.ACTIVE);
+    account.setUser(savedUser);
+
+    Account savedAccount =
+            accountRepository.save(account);
+
+    mockMvc.perform(
+                    post(
+                            "/api/accounts/"
+                                    + savedAccount.getId()
+                                    + "/withdraw"
+                    )
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "amount": 150.00
+                                    }
+                                    """)
+            )
+            .andExpect(status().isConflict())
+            .andExpect(
+                    jsonPath("$.title")
+                            .value("Insufficient funds")
+            )
+            .andExpect(
+                    jsonPath("$.status")
+                            .value(409)
+            );
+
+    Account unchangedAccount =
+            accountRepository
+                    .findById(savedAccount.getId())
+                    .orElseThrow();
+
+    assertEquals(
+            0,
+            new BigDecimal("100.00")
+                    .compareTo(unchangedAccount.getBalance())
+    );
+}
+@Test
+void shouldReturnDepositAndWithdrawalHistory() throws Exception {
+
+    User user = new User();
+    user.setFirstName("History");
+    user.setLastName("Integration");
+    user.setEmail(
+            "history-"
+                    + UUID.randomUUID()
+                    + "@example.com"
+    );
+
+    User savedUser = userRepository.save(user);
+
+    Account account = new Account();
+
+    account.setAccountNumber(
+            "BF-" + UUID.randomUUID()
+                    .toString()
+                    .replace("-", "")
+                    .toUpperCase()
+    );
+
+    account.setBalance(new BigDecimal("100.00"));
+    account.setCurrency(AccountCurrency.MAD);
+    account.setStatus(AccountStatus.ACTIVE);
+    account.setUser(savedUser);
+
+    Account savedAccount =
+            accountRepository.save(account);
+
+
+    // Dépôt : 100 -> 200
+    mockMvc.perform(
+            post(
+                    "/api/accounts/"
+                            + savedAccount.getId()
+                            + "/deposit"
+            )
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""
+                            {
+                              "amount": 100.00
+                            }
+                            """)
+    )
+    .andExpect(status().isOk());
+
+
+    // Retrait : 200 -> 150
+    mockMvc.perform(
+            post(
+                    "/api/accounts/"
+                            + savedAccount.getId()
+                            + "/withdraw"
+            )
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""
+                            {
+                              "amount": 50.00
+                            }
+                            """)
+    )
+    .andExpect(status().isOk());
+
+
+    // Historique
+    mockMvc.perform(
+                    get(
+                            "/api/accounts/"
+                                    + savedAccount.getId()
+                                    + "/transactions"
+                    )
+            )
+            .andExpect(status().isOk())
+            .andExpect(
+                    jsonPath("$.length()")
+                            .value(2)
+            )
+            .andExpect(
+                    jsonPath("$[0].type")
+                            .value("WITHDRAWAL")
+            )
+            .andExpect(
+                    jsonPath("$[0].amount")
+                            .value(50.00)
+            )
+            .andExpect(
+                    jsonPath("$[0].balanceAfter")
+                            .value(150.00)
+            )
+            .andExpect(
+                    jsonPath("$[1].type")
+                            .value("DEPOSIT")
+            )
+            .andExpect(
+                    jsonPath("$[1].amount")
+                            .value(100.00)
+            )
+            .andExpect(
+                    jsonPath("$[1].balanceAfter")
+                            .value(200.00)
+            );
+}
+@Test
+void shouldReturn404WhenGettingHistoryForUnknownAccount()
+        throws Exception {
+
+    mockMvc.perform(
+                    get(
+                            "/api/accounts/"
+                                    + Long.MAX_VALUE
+                                    + "/transactions"
+                    )
+            )
+            .andExpect(status().isNotFound())
+            .andExpect(
+                    jsonPath("$.title")
+                            .value("Account not found")
+            )
+            .andExpect(
+                    jsonPath("$.status")
+                            .value(404)
+            );
 }
 }   

@@ -1,230 +1,933 @@
-
-import { useState } from 'react'
-import type { FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import './App.css'
 
-type UserForm = {
+type User = {
+  id: number
   firstName: string
   lastName: string
   email: string
 }
 
-type ApiError = {
+type Account = {
+  id: number
+  accountNumber: string
+  balance: number
+  currency: 'MAD' | 'EUR'
+  status: 'ACTIVE' | 'BLOCKED'
+  userId: number
+  createdAt: string
+}
+
+type Transaction = {
+  id: number
+  type: 'DEPOSIT' | 'WITHDRAWAL'
+  amount: number
+  balanceAfter: number
+  accountId: number
+  createdAt: string
+}
+
+type ApiProblem = {
   title?: string
   detail?: string
   errors?: Record<string, string>
 }
 
 function App() {
+  // =====================================================
+  // USER
+  // =====================================================
 
-  // Données du formulaire
-  const [form, setForm] = useState<UserForm>({
-    firstName: '',
-    lastName: '',
-    email: '',
-  })
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [email, setEmail] = useState('')
 
-  // Messages et erreurs
+  const [currentUser, setCurrentUser] = useState<User | null>(null)
+  const [existingUserId, setExistingUserId] = useState('')
+
+  const [fieldErrors, setFieldErrors] =
+    useState<Record<string, string>>({})
+
+  // =====================================================
+  // ACCOUNT
+  // =====================================================
+
+  const [accounts, setAccounts] = useState<Account[]>([])
+  const [currency, setCurrency] =
+    useState<'MAD' | 'EUR'>('MAD')
+
+  const [amounts, setAmounts] =
+    useState<Record<number, string>>({})
+
+  // =====================================================
+  // TRANSACTIONS
+  // =====================================================
+
+  const [transactions, setTransactions] =
+    useState<Transaction[]>([])
+
+  const [historyAccountId, setHistoryAccountId] =
+    useState<number | null>(null)
+
+  // =====================================================
+  // GLOBAL MESSAGE
+  // =====================================================
+
   const [message, setMessage] = useState('')
-  const [fieldErrors, setFieldErrors] = useState<
-    Record<string, string>
-  >({})
+  const [isError, setIsError] = useState(false)
 
-  const [loading, setLoading] = useState(false)
 
-  // Mise à jour des champs
-  function handleChange(
-    event: React.ChangeEvent<HTMLInputElement>
-  ) {
-    const { name, value } = event.target
+  // =====================================================
+  // HELPERS
+  // =====================================================
 
-    setForm(previous => ({
-      ...previous,
-      [name]: value,
-    }))
+  async function getApiError(
+    response: Response
+  ): Promise<ApiProblem> {
+
+    try {
+      return await response.json()
+    } catch {
+      return {
+        title: 'Erreur',
+        detail: 'Une erreur inattendue est survenue.'
+      }
+    }
   }
 
-  // Création de l'utilisateur
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
 
+  function showSuccess(text: string) {
+    setMessage(text)
+    setIsError(false)
+  }
+
+
+  function showError(text: string) {
+    setMessage(text)
+    setIsError(true)
+  }
+
+
+  // =====================================================
+  // CREATE USER
+  // =====================================================
+
+  async function createUser(event: FormEvent) {
     event.preventDefault()
 
     setMessage('')
     setFieldErrors({})
-    setLoading(true)
 
     try {
-
       const response = await fetch('/api/users', {
         method: 'POST',
 
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
 
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          firstName,
+          lastName,
+          email
+        })
       })
 
-      if (response.ok) {
+      if (!response.ok) {
+        const problem = await getApiError(response)
 
-        const user = await response.json()
+        setFieldErrors(problem.errors ?? {})
 
-        setMessage(
-          `Utilisateur ${user.firstName} créé avec succès !`
+        showError(
+          problem.detail ??
+          problem.title ??
+          'Impossible de créer utilisateur.'
         )
 
-        // Réinitialiser le formulaire
-        setForm({
-          firstName: '',
-          lastName: '',
-          email: '',
-        })
-
-      } else {
-
-        const error: ApiError = await response.json()
-
-        setMessage(
-          error.detail || error.title || 'Une erreur est survenue.'
-        )
-
-        setFieldErrors(error.errors || {})
+        return
       }
 
-    } catch {
+      const user: User = await response.json()
 
-      setMessage(
-        'Impossible de communiquer avec le serveur BankFlow.'
+      setCurrentUser(user)
+      setExistingUserId(String(user.id))
+
+      setFirstName('')
+      setLastName('')
+      setEmail('')
+      setAccounts([])
+      setTransactions([])
+      setHistoryAccountId(null)
+
+      showSuccess(
+        `Utilisateur ${user.firstName} créé avec succès !`
       )
 
-    } finally {
+      await loadAccounts(user.id)
 
-      setLoading(false)
-
+    } catch {
+      showError(
+        'Impossible de communiquer avec le serveur BankFlow.'
+      )
     }
   }
 
+
+  // =====================================================
+  // LOAD EXISTING USER
+  // =====================================================
+
+  async function loadExistingUser() {
+
+    if (!existingUserId) {
+      showError('Renseigne un identifiant utilisateur.')
+      return
+    }
+
+    try {
+      const response = await fetch(
+        `/api/users/${existingUserId}`
+      )
+
+      if (!response.ok) {
+        const problem = await getApiError(response)
+
+        showError(
+          problem.detail ??
+          'Utilisateur introuvable.'
+        )
+
+        return
+      }
+
+      const user: User = await response.json()
+
+      setCurrentUser(user)
+      setTransactions([])
+      setHistoryAccountId(null)
+
+      await loadAccounts(user.id)
+
+      showSuccess(
+        `Utilisateur ${user.firstName} chargé.`
+      )
+
+    } catch {
+      showError(
+        'Impossible de communiquer avec le serveur BankFlow.'
+      )
+    }
+  }
+
+
+  // =====================================================
+  // LOAD ACCOUNTS
+  // =====================================================
+
+  async function loadAccounts(userId: number) {
+
+    const response = await fetch(
+      `/api/accounts/user/${userId}`
+    )
+
+    if (!response.ok) {
+      const problem = await getApiError(response)
+
+      throw new Error(
+        problem.detail ??
+        'Impossible de charger les comptes.'
+      )
+    }
+
+    const data: Account[] = await response.json()
+
+    setAccounts(data)
+  }
+
+
+  // =====================================================
+  // CREATE ACCOUNT
+  // =====================================================
+
+  async function createAccount() {
+
+    if (!currentUser) {
+      showError(
+        'Sélectionne ou crée d’abord un utilisateur.'
+      )
+      return
+    }
+
+    try {
+      const response = await fetch('/api/accounts', {
+        method: 'POST',
+
+        headers: {
+          'Content-Type': 'application/json'
+        },
+
+        body: JSON.stringify({
+          userId: currentUser.id,
+          currency
+        })
+      })
+
+      if (!response.ok) {
+        const problem = await getApiError(response)
+
+        showError(
+          problem.detail ??
+          problem.title ??
+          'Impossible de créer le compte.'
+        )
+
+        return
+      }
+
+      const account: Account =
+        await response.json()
+
+      await loadAccounts(currentUser.id)
+
+      showSuccess(
+        `Compte ${account.currency} créé avec succès.`
+      )
+
+    } catch {
+      showError(
+        'Impossible de communiquer avec le serveur BankFlow.'
+      )
+    }
+  }
+
+
+  // =====================================================
+  // UPDATE AMOUNT
+  // =====================================================
+
+  function updateAmount(
+    accountId: number,
+    value: string
+  ) {
+
+    setAmounts(previous => ({
+      ...previous,
+      [accountId]: value
+    }))
+  }
+
+
+  // =====================================================
+  // DEPOSIT
+  // =====================================================
+
+  async function deposit(account: Account) {
+
+    const amount = amounts[account.id]
+
+    if (!amount) {
+      showError('Renseigne un montant.')
+      return
+    }
+
+    try {
+      const response = await fetch(
+        `/api/accounts/${account.id}/deposit`,
+        {
+          method: 'POST',
+
+          headers: {
+            'Content-Type': 'application/json'
+          },
+
+          body: JSON.stringify({
+            amount: Number(amount)
+          })
+        }
+      )
+
+      if (!response.ok) {
+        const problem = await getApiError(response)
+
+        showError(
+          problem.errors?.amount ??
+          problem.detail ??
+          problem.title ??
+          'Dépôt impossible.'
+        )
+
+        return
+      }
+
+      const updatedAccount: Account =
+        await response.json()
+
+      setAmounts(previous => ({
+        ...previous,
+        [account.id]: ''
+      }))
+
+      if (currentUser) {
+        await loadAccounts(currentUser.id)
+      }
+
+      if (historyAccountId === account.id) {
+        await loadTransactions(account.id)
+      }
+
+      showSuccess(
+        `Dépôt effectué. Nouveau solde : ` +
+        `${updatedAccount.balance.toFixed(2)} ` +
+        `${updatedAccount.currency}`
+      )
+
+    } catch {
+      showError(
+        'Impossible de communiquer avec le serveur BankFlow.'
+      )
+    }
+  }
+
+
+  // =====================================================
+  // WITHDRAW
+  // =====================================================
+
+  async function withdraw(account: Account) {
+
+    const amount = amounts[account.id]
+
+    if (!amount) {
+      showError('Renseigne un montant.')
+      return
+    }
+
+    try {
+      const response = await fetch(
+        `/api/accounts/${account.id}/withdraw`,
+        {
+          method: 'POST',
+
+          headers: {
+            'Content-Type': 'application/json'
+          },
+
+          body: JSON.stringify({
+            amount: Number(amount)
+          })
+        }
+      )
+
+      if (!response.ok) {
+        const problem = await getApiError(response)
+
+        showError(
+          problem.errors?.amount ??
+          problem.detail ??
+          problem.title ??
+          'Retrait impossible.'
+        )
+
+        return
+      }
+
+      const updatedAccount: Account =
+        await response.json()
+
+      setAmounts(previous => ({
+        ...previous,
+        [account.id]: ''
+      }))
+
+      if (currentUser) {
+        await loadAccounts(currentUser.id)
+      }
+
+      if (historyAccountId === account.id) {
+        await loadTransactions(account.id)
+      }
+
+      showSuccess(
+        `Retrait effectué. Nouveau solde : ` +
+        `${updatedAccount.balance.toFixed(2)} ` +
+        `${updatedAccount.currency}`
+      )
+
+    } catch {
+      showError(
+        'Impossible de communiquer avec le serveur BankFlow.'
+      )
+    }
+  }
+
+
+  // =====================================================
+  // TRANSACTION HISTORY
+  // =====================================================
+
+  async function loadTransactions(
+    accountId: number
+  ) {
+
+    try {
+      const response = await fetch(
+        `/api/accounts/${accountId}/transactions`
+      )
+
+      if (!response.ok) {
+        const problem = await getApiError(response)
+
+        showError(
+          problem.detail ??
+          'Impossible de charger historique.'
+        )
+
+        return
+      }
+
+      const data: Transaction[] =
+        await response.json()
+
+      setTransactions(data)
+      setHistoryAccountId(accountId)
+
+    } catch {
+      showError(
+        'Impossible de communiquer avec le serveur BankFlow.'
+      )
+    }
+  }
+
+
+  // =====================================================
+  // UI
+  // =====================================================
+
   return (
-    <div className="app">
+    <main className="app">
 
       <header className="header">
-        <h1>BankFlow</h1>
-        <p>Gestion des utilisateurs</p>
+        <div>
+          <h1>BankFlow</h1>
+          <p>Banking QA Automation Demo</p>
+        </div>
       </header>
 
-      <main className="container">
+
+      {message && (
+        <div
+          id="message"
+          className={
+            isError
+              ? 'message error'
+              : 'message success'
+          }
+        >
+          {message}
+        </div>
+      )}
+
+
+      {/* ============================================= */}
+      {/* USER CREATION */}
+      {/* ============================================= */}
+
+      <section className="panel">
 
         <h2>Créer un utilisateur</h2>
 
-        <p className="description">
-          Renseignez les informations pour créer
-          un nouvel utilisateur.
-        </p>
-
         <form
-          id="userForm"
-          onSubmit={handleSubmit}
+          onSubmit={createUser}
           noValidate
+          className="form"
         >
 
-          <div className="form-group">
-
+          <div className="field">
             <label htmlFor="firstName">
               Prénom
             </label>
 
             <input
               id="firstName"
-              name="firstName"
-              type="text"
-              value={form.firstName}
-              onChange={handleChange}
-              placeholder="Votre prénom"
+              value={firstName}
+              onChange={event =>
+                setFirstName(event.target.value)
+              }
             />
 
             {fieldErrors.firstName && (
-  <p
-    id="firstName-error"
-    className="field-error"
-  >
-    {fieldErrors.firstName}
-  </p>
-)}
-
+              <span
+                id="firstName-error"
+                className="field-error"
+              >
+                {fieldErrors.firstName}
+              </span>
+            )}
           </div>
 
-          <div className="form-group">
 
+          <div className="field">
             <label htmlFor="lastName">
               Nom
             </label>
 
             <input
               id="lastName"
-              name="lastName"
-              type="text"
-              value={form.lastName}
-              onChange={handleChange}
-              placeholder="Votre nom"
+              value={lastName}
+              onChange={event =>
+                setLastName(event.target.value)
+              }
             />
-
-            {fieldErrors.lastName && (
-              <p className="field-error">
-                {fieldErrors.lastName}
-              </p>
-            )}
-
           </div>
 
-          <div className="form-group">
 
+          <div className="field">
             <label htmlFor="email">
               Email
             </label>
 
             <input
               id="email"
-              name="email"
-              type="email"
-              value={form.email}
-              onChange={handleChange}
-              placeholder="exemple@email.com"
+              value={email}
+              onChange={event =>
+                setEmail(event.target.value)
+              }
             />
 
             {fieldErrors.email && (
-              <p id="email-error" className="field-error">
+              <span
+                id="email-error"
+                className="field-error"
+              >
                 {fieldErrors.email}
-              </p>
+              </span>
             )}
-
           </div>
+
 
           <button
             id="createUserButton"
             type="submit"
-            disabled={loading}
           >
-            {loading
-              ? 'Enregistrement...'
-              : 'Créer un utilisateur'}
+            Créer utilisateur
           </button>
 
         </form>
 
-        {message && (
-          <p
-            id="message"
-            role="status"
-            aria-live="polite"
-            className="message"
+      </section>
+
+
+      {/* ============================================= */}
+      {/* LOAD USER */}
+      {/* ============================================= */}
+
+      <section className="panel">
+
+        <h2>Utilisateur existant</h2>
+
+        <div className="inline-form">
+
+          <input
+            id="existingUserId"
+            type="number"
+            min="1"
+            placeholder="ID utilisateur"
+            value={existingUserId}
+            onChange={event =>
+              setExistingUserId(event.target.value)
+            }
+          />
+
+          <button
+            id="loadUserButton"
+            type="button"
+            onClick={loadExistingUser}
           >
-            {message}
-          </p>
-        )}
+            Charger
+          </button>
 
-      </main>
+        </div>
 
-    </div>
+      </section>
+
+
+      {/* ============================================= */}
+      {/* ACTIVE USER */}
+      {/* ============================================= */}
+
+      {currentUser && (
+
+        <>
+
+          <section
+            id="activeUser"
+            className="panel user-panel"
+          >
+
+            <h2>Utilisateur actif</h2>
+
+            <strong>
+              {currentUser.firstName}{' '}
+              {currentUser.lastName}
+            </strong>
+
+            <span>{currentUser.email}</span>
+
+            <span>
+              ID : {currentUser.id}
+            </span>
+
+          </section>
+
+
+          {/* ========================================= */}
+          {/* CREATE ACCOUNT */}
+          {/* ========================================= */}
+
+          <section className="panel">
+
+            <h2>Créer un compte bancaire</h2>
+
+            <div className="inline-form">
+
+              <select
+                id="accountCurrency"
+                value={currency}
+                onChange={event =>
+                  setCurrency(
+                    event.target.value as
+                      'MAD' | 'EUR'
+                  )
+                }
+              >
+
+                <option value="MAD">
+                  MAD
+                </option>
+
+                <option value="EUR">
+                  EUR
+                </option>
+
+              </select>
+
+              <button
+                id="createAccountButton"
+                type="button"
+                onClick={createAccount}
+              >
+                Créer le compte
+              </button>
+
+            </div>
+
+          </section>
+
+
+          {/* ========================================= */}
+          {/* ACCOUNTS */}
+          {/* ========================================= */}
+
+          <section className="panel">
+
+            <h2>Mes comptes</h2>
+
+            <div
+              id="accountsList"
+              className="accounts-grid"
+            >
+
+              {accounts.length === 0 && (
+                <p>Aucun compte bancaire.</p>
+              )}
+
+
+              {accounts.map(account => (
+
+                <article
+                  key={account.id}
+                  className="account-card"
+                  data-testid="account-card"
+                >
+
+                  <div className="account-header">
+
+                    <div>
+                      <span className="currency">
+                        {account.currency}
+                      </span>
+
+                      <span
+                        className={
+                          account.status === 'ACTIVE'
+                            ? 'status active'
+                            : 'status blocked'
+                        }
+                      >
+                        {account.status}
+                      </span>
+                    </div>
+
+                    <strong className="balance">
+                      {Number(account.balance)
+                        .toFixed(2)}
+                      {' '}
+                      {account.currency}
+                    </strong>
+
+                  </div>
+
+
+                  <p className="account-number">
+                    {account.accountNumber}
+                  </p>
+
+
+                  <input
+                    id={`amount-${account.id}`}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="Montant"
+                    value={amounts[account.id] ?? ''}
+                    onChange={event =>
+                      updateAmount(
+                        account.id,
+                        event.target.value
+                      )
+                    }
+                  />
+
+
+                  <div className="account-actions">
+
+                    <button
+                      data-testid="deposit-button"
+                      type="button"
+                      onClick={() =>
+                        deposit(account)
+                      }
+                    >
+                      Déposer
+                    </button>
+
+                    <button
+                      data-testid="withdraw-button"
+                      type="button"
+                      onClick={() =>
+                        withdraw(account)
+                      }
+                    >
+                      Retirer
+                    </button>
+
+                    <button
+                      data-testid="history-button"
+                      type="button"
+                      className="secondary"
+                      onClick={() =>
+                        loadTransactions(
+                          account.id
+                        )
+                      }
+                    >
+                      Historique
+                    </button>
+
+                  </div>
+
+                </article>
+
+              ))}
+
+            </div>
+
+          </section>
+
+
+          {/* ========================================= */}
+          {/* HISTORY */}
+          {/* ========================================= */}
+
+          {historyAccountId !== null && (
+
+            <section
+              id="transaction-history"
+              className="panel"
+            >
+
+              <h2>Historique des transactions</h2>
+
+              {transactions.length === 0 ? (
+
+                <p>Aucune transaction.</p>
+
+              ) : (
+
+                <div className="transactions">
+
+                  {transactions.map(transaction => (
+
+                    <div
+                      key={transaction.id}
+                      className="transaction"
+                      data-testid="transaction-row"
+                    >
+
+                      <div>
+
+                        <strong>
+                          {transaction.type}
+                        </strong>
+
+                        <span>
+                          Solde après opération :
+                          {' '}
+                          {Number(
+                            transaction.balanceAfter
+                          ).toFixed(2)}
+                        </span>
+
+                      </div>
+
+
+                      <span
+                        className={
+                          transaction.type ===
+                          'DEPOSIT'
+                            ? 'transaction-amount deposit'
+                            : 'transaction-amount withdrawal'
+                        }
+                      >
+
+                        {transaction.type ===
+                        'DEPOSIT'
+                          ? '+'
+                          : '-'}
+
+                        {Number(
+                          transaction.amount
+                        ).toFixed(2)}
+
+                      </span>
+
+                    </div>
+
+                  ))}
+
+                </div>
+
+              )}
+
+            </section>
+
+          )}
+
+        </>
+
+      )}
+
+    </main>
   )
 }
 

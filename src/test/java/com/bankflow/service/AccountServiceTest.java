@@ -6,6 +6,13 @@ import com.bankflow.entity.AccountCurrency;
 import com.bankflow.entity.AccountStatus;
 import com.bankflow.entity.User;
 import com.bankflow.exception.UserNotFoundException;
+import com.bankflow.exception.AccountBlockedException;
+import com.bankflow.exception.AccountNotFoundException;
+import com.bankflow.exception.InvalidAmountException;
+import com.bankflow.exception.InsufficientFundsException;
+import com.bankflow.repository.TransactionRepository;
+import com.bankflow.entity.Transaction;
+import com.bankflow.entity.TransactionType;
 
 import com.bankflow.repository.AccountRepository;
 import com.bankflow.repository.UserRepository;
@@ -16,9 +23,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
 import java.util.Optional;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -40,6 +49,9 @@ class AccountServiceTest {
     // Service réel que nous allons tester
     @InjectMocks
     private AccountService accountService;
+
+    @Mock
+    private TransactionRepository transactionRepository;
 
 
     // TEST 1 : création réussie d'un compte bancaire
@@ -292,4 +304,473 @@ class AccountServiceTest {
                 times(2)
         ).save(any(Account.class));
     }
+    @Test
+void shouldDepositMoneyIntoActiveAccount() {
+
+    Account account = new Account();
+    account.setBalance(new BigDecimal("100.00"));
+    account.setStatus(AccountStatus.ACTIVE);
+
+    when(accountRepository.findById(1L))
+            .thenReturn(Optional.of(account));
+
+    when(accountRepository.save(account))
+            .thenReturn(account);
+
+    Account result = accountService.deposit(
+            1L,
+            new BigDecimal("50.00")
+    );
+
+    assertEquals(
+            0,
+            new BigDecimal("150.00")
+                    .compareTo(result.getBalance())
+    );
+
+    verify(accountRepository).save(account);
+}
+
+
+@Test
+void shouldRejectDepositWhenAccountDoesNotExist() {
+
+    when(accountRepository.findById(999L))
+            .thenReturn(Optional.empty());
+
+    AccountNotFoundException exception = assertThrows(
+            AccountNotFoundException.class,
+            () -> accountService.deposit(
+                    999L,
+                    new BigDecimal("50.00")
+            )
+    );
+
+    assertEquals(
+            "Account not found with id: 999",
+            exception.getMessage()
+    );
+
+    verify(accountRepository, never())
+            .save(any(Account.class));
+}
+
+
+@Test
+void shouldRejectDepositWhenAmountIsZero() {
+
+    Account account = new Account();
+    account.setBalance(new BigDecimal("100.00"));
+    account.setStatus(AccountStatus.ACTIVE);
+
+    when(accountRepository.findById(1L))
+            .thenReturn(Optional.of(account));
+
+    InvalidAmountException exception = assertThrows(
+            InvalidAmountException.class,
+            () -> accountService.deposit(
+                    1L,
+                    BigDecimal.ZERO
+            )
+    );
+
+    assertEquals(
+            "Deposit amount must be greater than 0",
+            exception.getMessage()
+    );
+
+    verify(accountRepository, never())
+            .save(any(Account.class));
+}
+
+
+@Test
+void shouldRejectDepositWhenAccountIsBlocked() {
+
+    Account account = new Account();
+    account.setBalance(new BigDecimal("100.00"));
+    account.setStatus(AccountStatus.BLOCKED);
+
+    when(accountRepository.findById(1L))
+            .thenReturn(Optional.of(account));
+
+    AccountBlockedException exception = assertThrows(
+            AccountBlockedException.class,
+            () -> accountService.deposit(
+                    1L,
+                    new BigDecimal("50.00")
+            )
+    );
+
+    assertEquals(
+            "Account is blocked with id: 1",
+            exception.getMessage()
+    );
+
+    verify(accountRepository, never())
+            .save(any(Account.class));
+}
+// =========================================================
+// WITHDRAWAL TEST 1
+// Retrait réussi
+// =========================================================
+
+@Test
+void shouldWithdrawMoneyFromActiveAccount() {
+
+    Account account = new Account();
+    account.setBalance(new BigDecimal("500.00"));
+    account.setStatus(AccountStatus.ACTIVE);
+
+    when(accountRepository.findById(1L))
+            .thenReturn(Optional.of(account));
+
+    when(accountRepository.save(account))
+            .thenReturn(account);
+
+    Account result = accountService.withdraw(
+            1L,
+            new BigDecimal("200.00")
+    );
+
+    assertEquals(
+            0,
+            new BigDecimal("300.00")
+                    .compareTo(result.getBalance())
+    );
+
+    verify(accountRepository).save(account);
+}
+
+
+// =========================================================
+// WITHDRAWAL TEST 2
+// Compte inexistant
+// =========================================================
+
+@Test
+void shouldRejectWithdrawalWhenAccountDoesNotExist() {
+
+    when(accountRepository.findById(999L))
+            .thenReturn(Optional.empty());
+
+    AccountNotFoundException exception = assertThrows(
+            AccountNotFoundException.class,
+            () -> accountService.withdraw(
+                    999L,
+                    new BigDecimal("50.00")
+            )
+    );
+
+    assertEquals(
+            "Account not found with id: 999",
+            exception.getMessage()
+    );
+
+    verify(accountRepository, never())
+            .save(any(Account.class));
+}
+
+
+// =========================================================
+// WITHDRAWAL TEST 3
+// Montant égal à zéro
+// =========================================================
+
+@Test
+void shouldRejectWithdrawalWhenAmountIsZero() {
+
+    Account account = new Account();
+    account.setBalance(new BigDecimal("500.00"));
+    account.setStatus(AccountStatus.ACTIVE);
+
+    when(accountRepository.findById(1L))
+            .thenReturn(Optional.of(account));
+
+    InvalidAmountException exception = assertThrows(
+            InvalidAmountException.class,
+            () -> accountService.withdraw(
+                    1L,
+                    BigDecimal.ZERO
+            )
+    );
+
+    assertEquals(
+            "Withdrawal amount must be greater than 0",
+            exception.getMessage()
+    );
+
+    assertEquals(
+            0,
+            new BigDecimal("500.00")
+                    .compareTo(account.getBalance())
+    );
+
+    verify(accountRepository, never())
+            .save(any(Account.class));
+}
+
+
+// =========================================================
+// WITHDRAWAL TEST 4
+// Compte bloqué
+// =========================================================
+
+@Test
+void shouldRejectWithdrawalWhenAccountIsBlocked() {
+
+    Account account = new Account();
+    account.setBalance(new BigDecimal("500.00"));
+    account.setStatus(AccountStatus.BLOCKED);
+
+    when(accountRepository.findById(1L))
+            .thenReturn(Optional.of(account));
+
+    AccountBlockedException exception = assertThrows(
+            AccountBlockedException.class,
+            () -> accountService.withdraw(
+                    1L,
+                    new BigDecimal("50.00")
+            )
+    );
+
+    assertEquals(
+            "Account is blocked with id: 1",
+            exception.getMessage()
+    );
+
+    assertEquals(
+            0,
+            new BigDecimal("500.00")
+                    .compareTo(account.getBalance())
+    );
+
+    verify(accountRepository, never())
+            .save(any(Account.class));
+}
+
+
+// =========================================================
+// WITHDRAWAL TEST 5
+// Solde insuffisant
+// =========================================================
+
+@Test
+void shouldRejectWithdrawalWhenBalanceIsInsufficient() {
+
+    Account account = new Account();
+    account.setBalance(new BigDecimal("100.00"));
+    account.setStatus(AccountStatus.ACTIVE);
+
+    when(accountRepository.findById(1L))
+            .thenReturn(Optional.of(account));
+
+    InsufficientFundsException exception = assertThrows(
+            InsufficientFundsException.class,
+            () -> accountService.withdraw(
+                    1L,
+                    new BigDecimal("150.00")
+            )
+    );
+
+    assertEquals(
+            "Insufficient funds for account with id: 1",
+            exception.getMessage()
+    );
+
+    // Le solde ne doit pas avoir changé
+    assertEquals(
+            0,
+            new BigDecimal("100.00")
+                    .compareTo(account.getBalance())
+    );
+
+    verify(accountRepository, never())
+            .save(any(Account.class));
+}
+// =========================================================
+// TRANSACTION TEST 1
+// Un dépôt doit créer une transaction DEPOSIT
+// =========================================================
+
+@Test
+void shouldCreateDepositTransaction() {
+
+    Account account = new Account();
+    account.setBalance(new BigDecimal("100.00"));
+    account.setStatus(AccountStatus.ACTIVE);
+
+    when(accountRepository.findById(1L))
+            .thenReturn(Optional.of(account));
+
+    when(accountRepository.save(account))
+            .thenReturn(account);
+
+    accountService.deposit(
+            1L,
+            new BigDecimal("50.00")
+    );
+
+    ArgumentCaptor<Transaction> transactionCaptor =
+            ArgumentCaptor.forClass(Transaction.class);
+
+    verify(transactionRepository)
+            .save(transactionCaptor.capture());
+
+    Transaction transaction =
+            transactionCaptor.getValue();
+
+    assertEquals(
+            TransactionType.DEPOSIT,
+            transaction.getType()
+    );
+
+    assertEquals(
+            0,
+            new BigDecimal("50.00")
+                    .compareTo(transaction.getAmount())
+    );
+
+    assertEquals(
+            0,
+            new BigDecimal("150.00")
+                    .compareTo(transaction.getBalanceAfter())
+    );
+
+    assertSame(
+            account,
+            transaction.getAccount()
+    );
+}
+// =========================================================
+// TRANSACTION TEST 2
+// Un retrait doit créer une transaction WITHDRAWAL
+// =========================================================
+
+@Test
+void shouldCreateWithdrawalTransaction() {
+
+    Account account = new Account();
+    account.setBalance(new BigDecimal("500.00"));
+    account.setStatus(AccountStatus.ACTIVE);
+
+    when(accountRepository.findById(1L))
+            .thenReturn(Optional.of(account));
+
+    when(accountRepository.save(account))
+            .thenReturn(account);
+
+    accountService.withdraw(
+            1L,
+            new BigDecimal("200.00")
+    );
+
+    ArgumentCaptor<Transaction> transactionCaptor =
+            ArgumentCaptor.forClass(Transaction.class);
+
+    verify(transactionRepository)
+            .save(transactionCaptor.capture());
+
+    Transaction transaction =
+            transactionCaptor.getValue();
+
+    assertEquals(
+            TransactionType.WITHDRAWAL,
+            transaction.getType()
+    );
+
+    assertEquals(
+            0,
+            new BigDecimal("200.00")
+                    .compareTo(transaction.getAmount())
+    );
+
+    assertEquals(
+            0,
+            new BigDecimal("300.00")
+                    .compareTo(transaction.getBalanceAfter())
+    );
+
+    assertSame(
+            account,
+            transaction.getAccount()
+    );
+}
+// =========================================================
+// TRANSACTION TEST 3
+// Récupérer l'historique
+// =========================================================
+
+@Test
+void shouldReturnTransactionsForExistingAccount() {
+
+    Account account = new Account();
+
+    Transaction deposit = new Transaction();
+    deposit.setType(TransactionType.DEPOSIT);
+    deposit.setAmount(new BigDecimal("500.00"));
+    deposit.setBalanceAfter(new BigDecimal("500.00"));
+    deposit.setAccount(account);
+
+    Transaction withdrawal = new Transaction();
+    withdrawal.setType(TransactionType.WITHDRAWAL);
+    withdrawal.setAmount(new BigDecimal("100.00"));
+    withdrawal.setBalanceAfter(new BigDecimal("400.00"));
+    withdrawal.setAccount(account);
+
+    when(accountRepository.existsById(1L))
+            .thenReturn(true);
+
+    when(
+            transactionRepository
+                    .findByAccountIdOrderByCreatedAtDesc(1L)
+    ).thenReturn(
+            List.of(withdrawal, deposit)
+    );
+
+    List<Transaction> result =
+            accountService.getTransactions(1L);
+
+    assertEquals(2, result.size());
+
+    assertEquals(
+            TransactionType.WITHDRAWAL,
+            result.get(0).getType()
+    );
+
+    assertEquals(
+            TransactionType.DEPOSIT,
+            result.get(1).getType()
+    );
+
+    verify(
+            transactionRepository
+    ).findByAccountIdOrderByCreatedAtDesc(1L);
+}
+// =========================================================
+// TRANSACTION TEST 4
+// Historique d'un compte inexistant
+// =========================================================
+
+@Test
+void shouldRejectTransactionHistoryWhenAccountDoesNotExist() {
+
+    when(accountRepository.existsById(999L))
+            .thenReturn(false);
+
+    AccountNotFoundException exception = assertThrows(
+            AccountNotFoundException.class,
+            () -> accountService.getTransactions(999L)
+    );
+
+    assertEquals(
+            "Account not found with id: 999",
+            exception.getMessage()
+    );
+
+    verify(
+            transactionRepository,
+            never()
+    ).findByAccountIdOrderByCreatedAtDesc(999L);
+}
 }

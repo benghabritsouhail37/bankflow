@@ -6,6 +6,7 @@ import com.bankflow.entity.AccountStatus;
 import com.bankflow.entity.User;
 import com.bankflow.repository.AccountRepository;
 import com.bankflow.repository.UserRepository;
+import com.bankflow.repository.TransactionRepository;
 
 import io.restassured.RestAssured;
 import io.restassured.http.ContentType;
@@ -49,42 +50,41 @@ class AccountApiRestAssuredTest {
 
     private Long createdUserId;
 
-
-    // =========================================================
-    // SETUP
-    // =========================================================
+    @Autowired
+    private TransactionRepository transactionRepository;
 
     @BeforeEach
     void setUp() {
-
         RestAssured.baseURI = "http://localhost";
         RestAssured.port = port;
     }
-
-
-    // =========================================================
-    // CLEANUP
-    // =========================================================
-
     @AfterEach
-    void cleanUp() {
+void cleanUp() {
 
-        if (createdUserId != null) {
+    if (createdUserId != null) {
 
-            List<Account> accounts =
-                    accountRepository.findByUserId(createdUserId);
+        List<Account> accounts =
+                accountRepository.findByUserId(createdUserId);
 
-            accountRepository.deleteAll(accounts);
+        // 1. Supprimer les transactions
+        for (Account account : accounts) {
 
-            userRepository.findById(createdUserId)
-                    .ifPresent(userRepository::delete);
+            transactionRepository.deleteAll(
+                    transactionRepository
+                            .findByAccountIdOrderByCreatedAtDesc(
+                                    account.getId()
+                            )
+            );
         }
+
+        // 2. Supprimer les comptes
+        accountRepository.deleteAll(accounts);
+
+        // 3. Supprimer l'utilisateur
+        userRepository.findById(createdUserId)
+                .ifPresent(userRepository::delete);
     }
-
-
-    // =========================================================
-    // MÉTHODE UTILITAIRE
-    // =========================================================
+}
 
     private User createTestUser(String prefix) {
 
@@ -106,6 +106,31 @@ class AccountApiRestAssuredTest {
 
         return savedUser;
     }
+
+    private Account createTestAccount(
+            User user,
+            BigDecimal balance,
+            AccountStatus status) {
+
+        Account account = new Account();
+
+        account.setAccountNumber(
+                "BF-" + UUID.randomUUID()
+                        .toString()
+                        .replace("-", "")
+                        .toUpperCase()
+        );
+
+        account.setBalance(balance);
+        account.setCurrency(AccountCurrency.MAD);
+        account.setStatus(status);
+        account.setUser(user);
+
+        return accountRepository.save(account);
+    }
+
+    // tes tests ici...
+
 
 
     // =========================================================
@@ -845,4 +870,825 @@ class AccountApiRestAssuredTest {
         .then()
                 .statusCode(404);
     }
+    // =========================================================
+// DEPOSIT REST TEST 1
+// Dépôt réussi
+// =========================================================
+
+@Test
+void shouldDepositMoneyThroughRealHttpRequest() {
+
+    User user = createTestUser("DEPOSIT");
+
+    Account account = createTestAccount(
+            user,
+            new BigDecimal("100.00"),
+            AccountStatus.ACTIVE
+    );
+
+    given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {
+                      "amount": 50.00
+                    }
+                    """)
+
+    .when()
+            .post(
+                    "/api/accounts/"
+                            + account.getId()
+                            + "/deposit"
+            )
+
+    .then()
+            .statusCode(200)
+            .body("balance", equalTo(150.0f))
+            .body("currency", equalTo("MAD"))
+            .body("status", equalTo("ACTIVE"))
+            .body(
+                    "userId",
+                    equalTo(user.getId().intValue())
+            );
+
+
+    Account updatedAccount =
+            accountRepository
+                    .findById(account.getId())
+                    .orElseThrow();
+
+    assertEquals(
+            0,
+            new BigDecimal("150.00")
+                    .compareTo(updatedAccount.getBalance())
+    );
+}
+
+
+// =========================================================
+// DEPOSIT REST TEST 2
+// Compte inexistant
+// =========================================================
+
+@Test
+void shouldReturn404WhenDepositingIntoNonExistingAccount() {
+
+    long accountsBefore =
+            accountRepository.count();
+
+    given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {
+                      "amount": 50.00
+                    }
+                    """)
+
+    .when()
+            .post(
+                    "/api/accounts/"
+                            + Long.MAX_VALUE
+                            + "/deposit"
+            )
+
+    .then()
+            .statusCode(404)
+            .body(
+                    "title",
+                    equalTo("Account not found")
+            )
+            .body(
+                    "status",
+                    equalTo(404)
+            )
+            .body(
+                    "detail",
+                    equalTo(
+                            "Account not found with id: "
+                                    + Long.MAX_VALUE
+                    )
+            );
+
+    assertEquals(
+            accountsBefore,
+            accountRepository.count()
+    );
+}
+
+
+// =========================================================
+// DEPOSIT REST TEST 3
+// Montant zéro
+// =========================================================
+
+@Test
+void shouldReturn400WhenDepositAmountIsZero() {
+
+    User user = createTestUser("ZERO-DEPOSIT");
+
+    Account account = createTestAccount(
+            user,
+            new BigDecimal("100.00"),
+            AccountStatus.ACTIVE
+    );
+
+    given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {
+                      "amount": 0
+                    }
+                    """)
+
+    .when()
+            .post(
+                    "/api/accounts/"
+                            + account.getId()
+                            + "/deposit"
+            )
+
+    .then()
+            .statusCode(400)
+            .body(
+                    "title",
+                    equalTo("Validation failed")
+            )
+            .body(
+                    "status",
+                    equalTo(400)
+            )
+            .body(
+                    "errors.amount",
+                    equalTo(
+                            "Amount must be greater than 0"
+                    )
+            );
+
+
+    Account unchangedAccount =
+            accountRepository
+                    .findById(account.getId())
+                    .orElseThrow();
+
+    assertEquals(
+            0,
+            new BigDecimal("100.00")
+                    .compareTo(unchangedAccount.getBalance())
+    );
+}
+
+
+// =========================================================
+// DEPOSIT REST TEST 4
+// Montant négatif
+// =========================================================
+
+@Test
+void shouldReturn400WhenDepositAmountIsNegative() {
+
+    User user = createTestUser("NEGATIVE-DEPOSIT");
+
+    Account account = createTestAccount(
+            user,
+            new BigDecimal("100.00"),
+            AccountStatus.ACTIVE
+    );
+
+    given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {
+                      "amount": -50.00
+                    }
+                    """)
+
+    .when()
+            .post(
+                    "/api/accounts/"
+                            + account.getId()
+                            + "/deposit"
+            )
+
+    .then()
+            .statusCode(400)
+            .body(
+                    "title",
+                    equalTo("Validation failed")
+            )
+            .body(
+                    "errors.amount",
+                    equalTo(
+                            "Amount must be greater than 0"
+                    )
+            );
+
+
+    Account unchangedAccount =
+            accountRepository
+                    .findById(account.getId())
+                    .orElseThrow();
+
+    assertEquals(
+            0,
+            new BigDecimal("100.00")
+                    .compareTo(unchangedAccount.getBalance())
+    );
+}
+
+
+// =========================================================
+// DEPOSIT REST TEST 5
+// Montant absent
+// =========================================================
+
+@Test
+void shouldReturn400WhenDepositAmountIsMissing() {
+
+    User user = createTestUser("MISSING-AMOUNT");
+
+    Account account = createTestAccount(
+            user,
+            new BigDecimal("100.00"),
+            AccountStatus.ACTIVE
+    );
+
+    given()
+            .contentType(ContentType.JSON)
+            .body("{}")
+
+    .when()
+            .post(
+                    "/api/accounts/"
+                            + account.getId()
+                            + "/deposit"
+            )
+
+    .then()
+            .statusCode(400)
+            .body(
+                    "title",
+                    equalTo("Validation failed")
+            )
+            .body(
+                    "status",
+                    equalTo(400)
+            )
+            .body(
+                    "errors.amount",
+                    equalTo("Amount is required")
+            );
+
+
+    Account unchangedAccount =
+            accountRepository
+                    .findById(account.getId())
+                    .orElseThrow();
+
+    assertEquals(
+            0,
+            new BigDecimal("100.00")
+                    .compareTo(unchangedAccount.getBalance())
+    );
+}
+
+
+// =========================================================
+// DEPOSIT REST TEST 6
+// Compte bloqué
+// =========================================================
+
+@Test
+void shouldReturn409WhenDepositingIntoBlockedAccount() {
+
+    User user = createTestUser("BLOCKED-DEPOSIT");
+
+    Account account = createTestAccount(
+            user,
+            new BigDecimal("100.00"),
+            AccountStatus.BLOCKED
+    );
+
+    given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {
+                      "amount": 50.00
+                    }
+                    """)
+
+    .when()
+            .post(
+                    "/api/accounts/"
+                            + account.getId()
+                            + "/deposit"
+            )
+
+    .then()
+            .statusCode(409)
+            .body(
+                    "title",
+                    equalTo("Account blocked")
+            )
+            .body(
+                    "status",
+                    equalTo(409)
+            )
+            .body(
+                    "detail",
+                    equalTo(
+                            "Account is blocked with id: "
+                                    + account.getId()
+                    )
+            );
+
+
+    Account unchangedAccount =
+            accountRepository
+                    .findById(account.getId())
+                    .orElseThrow();
+
+    assertEquals(
+            0,
+            new BigDecimal("100.00")
+                    .compareTo(unchangedAccount.getBalance())
+    );
+}
+@Test
+void shouldWithdrawMoneyThroughRealHttpRequest() {
+
+    User user = createTestUser("WITHDRAW");
+
+    Account account = createTestAccount(
+            user,
+            new BigDecimal("500.00"),
+            AccountStatus.ACTIVE
+    );
+
+    given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {
+                      "amount": 200.00
+                    }
+                    """)
+
+    .when()
+            .post(
+                    "/api/accounts/"
+                            + account.getId()
+                            + "/withdraw"
+            )
+
+    .then()
+            .statusCode(200)
+            .body("balance", equalTo(300.0f))
+            .body("currency", equalTo("MAD"))
+            .body("status", equalTo("ACTIVE"))
+            .body(
+                    "userId",
+                    equalTo(user.getId().intValue())
+            );
+
+    Account updatedAccount =
+            accountRepository
+                    .findById(account.getId())
+                    .orElseThrow();
+
+    assertEquals(
+            0,
+            new BigDecimal("300.00")
+                    .compareTo(updatedAccount.getBalance())
+    );
+}
+@Test
+void shouldReturn404WhenWithdrawingFromNonExistingAccount() {
+
+    long accountsBefore = accountRepository.count();
+
+    given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {
+                      "amount": 50.00
+                    }
+                    """)
+
+    .when()
+            .post(
+                    "/api/accounts/"
+                            + Long.MAX_VALUE
+                            + "/withdraw"
+            )
+
+    .then()
+            .statusCode(404)
+            .body(
+                    "title",
+                    equalTo("Account not found")
+            )
+            .body(
+                    "status",
+                    equalTo(404)
+            )
+            .body(
+                    "detail",
+                    equalTo(
+                            "Account not found with id: "
+                                    + Long.MAX_VALUE
+                    )
+            );
+
+    assertEquals(
+            accountsBefore,
+            accountRepository.count()
+    );
+}
+@Test
+void shouldReturn400WhenWithdrawalAmountIsZero() {
+
+    User user = createTestUser("ZERO-WITHDRAW");
+
+    Account account = createTestAccount(
+            user,
+            new BigDecimal("500.00"),
+            AccountStatus.ACTIVE
+    );
+
+    given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {
+                      "amount": 0
+                    }
+                    """)
+
+    .when()
+            .post(
+                    "/api/accounts/"
+                            + account.getId()
+                            + "/withdraw"
+            )
+
+    .then()
+            .statusCode(400)
+            .body(
+                    "title",
+                    equalTo("Validation failed")
+            )
+            .body(
+                    "errors.amount",
+                    equalTo("Amount must be greater than 0")
+            );
+
+    Account unchangedAccount =
+            accountRepository
+                    .findById(account.getId())
+                    .orElseThrow();
+
+    assertEquals(
+            0,
+            new BigDecimal("500.00")
+                    .compareTo(unchangedAccount.getBalance())
+    );
+}
+@Test
+void shouldReturn400WhenWithdrawalAmountIsNegative() {
+
+    User user = createTestUser("NEGATIVE-WITHDRAW");
+
+    Account account = createTestAccount(
+            user,
+            new BigDecimal("500.00"),
+            AccountStatus.ACTIVE
+    );
+
+    given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {
+                      "amount": -50.00
+                    }
+                    """)
+
+    .when()
+            .post(
+                    "/api/accounts/"
+                            + account.getId()
+                            + "/withdraw"
+            )
+
+    .then()
+            .statusCode(400)
+            .body(
+                    "title",
+                    equalTo("Validation failed")
+            )
+            .body(
+                    "errors.amount",
+                    equalTo("Amount must be greater than 0")
+            );
+
+    Account unchangedAccount =
+            accountRepository
+                    .findById(account.getId())
+                    .orElseThrow();
+
+    assertEquals(
+            0,
+            new BigDecimal("500.00")
+                    .compareTo(unchangedAccount.getBalance())
+    );
+}
+@Test
+void shouldReturn400WhenWithdrawalAmountIsMissing() {
+
+    User user = createTestUser("MISSING-WITHDRAW");
+
+    Account account = createTestAccount(
+            user,
+            new BigDecimal("500.00"),
+            AccountStatus.ACTIVE
+    );
+
+    given()
+            .contentType(ContentType.JSON)
+            .body("{}")
+
+    .when()
+            .post(
+                    "/api/accounts/"
+                            + account.getId()
+                            + "/withdraw"
+            )
+
+    .then()
+            .statusCode(400)
+            .body(
+                    "title",
+                    equalTo("Validation failed")
+            )
+            .body(
+                    "errors.amount",
+                    equalTo("Amount is required")
+            );
+
+    Account unchangedAccount =
+            accountRepository
+                    .findById(account.getId())
+                    .orElseThrow();
+
+    assertEquals(
+            0,
+            new BigDecimal("500.00")
+                    .compareTo(unchangedAccount.getBalance())
+    );
+}
+@Test
+void shouldReturn409WhenWithdrawingFromBlockedAccount() {
+
+    User user = createTestUser("BLOCKED-WITHDRAW");
+
+    Account account = createTestAccount(
+            user,
+            new BigDecimal("500.00"),
+            AccountStatus.BLOCKED
+    );
+
+    given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {
+                      "amount": 50.00
+                    }
+                    """)
+
+    .when()
+            .post(
+                    "/api/accounts/"
+                            + account.getId()
+                            + "/withdraw"
+            )
+
+    .then()
+            .statusCode(409)
+            .body(
+                    "title",
+                    equalTo("Account blocked")
+            )
+            .body(
+                    "status",
+                    equalTo(409)
+            );
+
+    Account unchangedAccount =
+            accountRepository
+                    .findById(account.getId())
+                    .orElseThrow();
+
+    assertEquals(
+            0,
+            new BigDecimal("500.00")
+                    .compareTo(unchangedAccount.getBalance())
+    );
+}
+@Test
+void shouldReturn409WhenWithdrawalExceedsBalance() {
+
+    User user = createTestUser("INSUFFICIENT-WITHDRAW");
+
+    Account account = createTestAccount(
+            user,
+            new BigDecimal("100.00"),
+            AccountStatus.ACTIVE
+    );
+
+    given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {
+                      "amount": 150.00
+                    }
+                    """)
+
+    .when()
+            .post(
+                    "/api/accounts/"
+                            + account.getId()
+                            + "/withdraw"
+            )
+
+    .then()
+            .statusCode(409)
+            .body(
+                    "title",
+                    equalTo("Insufficient funds")
+            )
+            .body(
+                    "status",
+                    equalTo(409)
+            )
+            .body(
+                    "detail",
+                    equalTo(
+                            "Insufficient funds for account with id: "
+                                    + account.getId()
+                    )
+            );
+
+    Account unchangedAccount =
+            accountRepository
+                    .findById(account.getId())
+                    .orElseThrow();
+
+    assertEquals(
+            0,
+            new BigDecimal("100.00")
+                    .compareTo(unchangedAccount.getBalance())
+    );
+}
+@Test
+void shouldReturnTransactionHistoryThroughRealHttp() {
+
+    User user = createTestUser("HISTORY");
+
+    Account account = createTestAccount(
+            user,
+            new BigDecimal("100.00"),
+            AccountStatus.ACTIVE
+    );
+
+    // Dépôt
+    given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {
+                      "amount": 100.00
+                    }
+                    """)
+    .when()
+            .post(
+                    "/api/accounts/"
+                            + account.getId()
+                            + "/deposit"
+            )
+    .then()
+            .statusCode(200);
+
+
+    // Retrait
+    given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {
+                      "amount": 50.00
+                    }
+                    """)
+    .when()
+            .post(
+                    "/api/accounts/"
+                            + account.getId()
+                            + "/withdraw"
+            )
+    .then()
+            .statusCode(200);
+
+
+    // Historique
+    given()
+
+    .when()
+            .get(
+                    "/api/accounts/"
+                            + account.getId()
+                            + "/transactions"
+            )
+
+    .then()
+            .statusCode(200)
+
+            .body(
+                    "size()",
+                    equalTo(2)
+            )
+
+            .body(
+                    "[0].type",
+                    equalTo("WITHDRAWAL")
+            )
+
+            .body(
+                    "[0].amount",
+                    equalTo(50.0f)
+            )
+
+            .body(
+                    "[0].balanceAfter",
+                    equalTo(150.0f)
+            )
+
+            .body(
+                    "[1].type",
+                    equalTo("DEPOSIT")
+            )
+
+            .body(
+                    "[1].amount",
+                    equalTo(100.0f)
+            )
+
+            .body(
+                    "[1].balanceAfter",
+                    equalTo(200.0f)
+            );
+}
+@Test
+void shouldReturnEmptyHistoryForAccountWithoutTransactions() {
+
+    User user = createTestUser("EMPTY-HISTORY");
+
+    Account account = createTestAccount(
+            user,
+            BigDecimal.ZERO,
+            AccountStatus.ACTIVE
+    );
+
+    given()
+
+    .when()
+            .get(
+                    "/api/accounts/"
+                            + account.getId()
+                            + "/transactions"
+            )
+
+    .then()
+            .statusCode(200)
+            .body(
+                    "size()",
+                    equalTo(0)
+            );
+}
+@Test
+void shouldReturn404ForTransactionHistoryOfUnknownAccount() {
+
+    given()
+
+    .when()
+            .get(
+                    "/api/accounts/"
+                            + Long.MAX_VALUE
+                            + "/transactions"
+            )
+
+    .then()
+            .statusCode(404)
+            .body(
+                    "title",
+                    equalTo("Account not found")
+            )
+            .body(
+                    "status",
+                    equalTo(404)
+            );
+}
 }

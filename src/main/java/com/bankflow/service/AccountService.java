@@ -5,6 +5,14 @@ import com.bankflow.entity.Account;
 import com.bankflow.entity.AccountCurrency;
 import com.bankflow.entity.AccountStatus;
 import com.bankflow.entity.User;
+import com.bankflow.exception.AccountBlockedException;
+import com.bankflow.exception.AccountNotFoundException;
+import com.bankflow.exception.InvalidAmountException;
+import com.bankflow.exception.InsufficientFundsException;
+import com.bankflow.entity.Transaction;
+import com.bankflow.entity.TransactionType;
+import com.bankflow.repository.TransactionRepository;
+
 
 import com.bankflow.exception.UserNotFoundException;
 
@@ -17,20 +25,24 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.List;
 
 @Service
 public class AccountService {
 
     private final AccountRepository accountRepository;
     private final UserRepository userRepository;
+    private final TransactionRepository transactionRepository;
 
-    public AccountService(
-            AccountRepository accountRepository,
-            UserRepository userRepository) {
+   public AccountService(
+        AccountRepository accountRepository,
+        UserRepository userRepository,
+        TransactionRepository transactionRepository) {
 
-        this.accountRepository = accountRepository;
-        this.userRepository = userRepository;
-    }
+    this.accountRepository = accountRepository;
+    this.userRepository = userRepository;
+    this.transactionRepository = transactionRepository;
+}
 
 
     // Créer un compte bancaire fictif
@@ -88,4 +100,104 @@ public class AccountService {
                     .replace("-", "")
                     .toUpperCase(Locale.ROOT);
     }
+    @Transactional
+public Account deposit(Long accountId, BigDecimal amount) {
+
+    Account account = accountRepository.findById(accountId)
+            .orElseThrow(
+                    () -> new AccountNotFoundException(accountId)
+            );
+
+    if (amount == null ||
+            amount.compareTo(BigDecimal.ZERO) <= 0) {
+
+        throw new InvalidAmountException(
+                "Deposit amount must be greater than 0"
+        );
+    }
+
+    if (account.getStatus() == AccountStatus.BLOCKED) {
+
+        throw new AccountBlockedException(accountId);
+    }
+
+    account.setBalance(
+        account.getBalance().add(amount)
+);
+
+Account savedAccount =
+        accountRepository.save(account);
+
+Transaction transaction = new Transaction();
+
+transaction.setType(TransactionType.DEPOSIT);
+transaction.setAmount(amount);
+transaction.setBalanceAfter(savedAccount.getBalance());
+transaction.setAccount(savedAccount);
+
+transactionRepository.save(transaction);
+
+return savedAccount;
+}
+@Transactional
+public Account withdraw(Long accountId, BigDecimal amount) {
+
+    Account account = accountRepository.findById(accountId)
+            .orElseThrow(
+                    () -> new AccountNotFoundException(accountId)
+            );
+
+    if (amount == null ||
+            amount.compareTo(BigDecimal.ZERO) <= 0) {
+
+        throw new InvalidAmountException(
+                "Withdrawal amount must be greater than 0"
+        );
+    }
+
+    if (account.getStatus() == AccountStatus.BLOCKED) {
+        throw new AccountBlockedException(accountId);
+    }
+
+    if (amount.compareTo(account.getBalance()) > 0) {
+        throw new InsufficientFundsException(accountId);
+    }
+
+    account.setBalance(
+        account.getBalance().subtract(amount)
+);
+
+Account savedAccount =
+        accountRepository.save(account);
+
+Transaction transaction = new Transaction();
+
+transaction.setType(TransactionType.WITHDRAWAL);
+transaction.setAmount(amount);
+transaction.setBalanceAfter(savedAccount.getBalance());
+transaction.setAccount(savedAccount);
+
+transactionRepository.save(transaction);
+
+return savedAccount;
+}
+@Transactional(readOnly = true)
+public List<Transaction> getTransactions(Long accountId) {
+
+    if (!accountRepository.existsById(accountId)) {
+        throw new AccountNotFoundException(accountId);
+    }
+
+    return transactionRepository
+            .findByAccountIdOrderByCreatedAtDesc(accountId);
+}
+@Transactional(readOnly = true)
+public List<Account> getAccountsByUserId(Long userId) {
+
+    if (!userRepository.existsById(userId)) {
+        throw new UserNotFoundException(userId);
+    }
+
+    return accountRepository.findByUserId(userId);
+}
 }

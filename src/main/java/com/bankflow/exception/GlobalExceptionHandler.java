@@ -1,5 +1,10 @@
 package com.bankflow.exception;
 
+import com.bankflow.exception.AccountBlockedException;
+import com.bankflow.exception.AccountNotFoundException;
+import com.bankflow.exception.InvalidAmountException;
+import com.bankflow.exception.InsufficientFundsException;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 
@@ -86,6 +91,64 @@ public ResponseEntity<ProblemDetail> handleUnreadableRequest(
 
     return ResponseEntity
             .status(HttpStatus.BAD_REQUEST)
+            .body(problem);
+}
+@ExceptionHandler(AccountNotFoundException.class)
+public ResponseEntity<ProblemDetail> handleAccountNotFound(
+        AccountNotFoundException exception) {
+
+    ProblemDetail problem =
+            ProblemDetail.forStatus(HttpStatus.NOT_FOUND);
+
+    problem.setTitle("Account not found");
+    problem.setDetail(exception.getMessage());
+
+    return ResponseEntity
+            .status(HttpStatus.NOT_FOUND)
+            .body(problem);
+}
+
+@ExceptionHandler(AccountBlockedException.class)
+public ResponseEntity<ProblemDetail> handleAccountBlocked(
+        AccountBlockedException exception) {
+
+    ProblemDetail problem =
+            ProblemDetail.forStatus(HttpStatus.CONFLICT);
+
+    problem.setTitle("Account blocked");
+    problem.setDetail(exception.getMessage());
+
+    return ResponseEntity
+            .status(HttpStatus.CONFLICT)
+            .body(problem);
+}
+
+@ExceptionHandler(InvalidAmountException.class)
+public ResponseEntity<ProblemDetail> handleInvalidAmount(
+        InvalidAmountException exception) {
+
+    ProblemDetail problem =
+            ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
+
+    problem.setTitle("Invalid amount");
+    problem.setDetail(exception.getMessage());
+
+    return ResponseEntity
+            .status(HttpStatus.BAD_REQUEST)
+            .body(problem);
+}
+@ExceptionHandler(InsufficientFundsException.class)
+public ResponseEntity<ProblemDetail> handleInsufficientFunds(
+        InsufficientFundsException exception) {
+
+    ProblemDetail problem =
+            ProblemDetail.forStatus(HttpStatus.CONFLICT);
+
+    problem.setTitle("Insufficient funds");
+    problem.setDetail(exception.getMessage());
+
+    return ResponseEntity
+            .status(HttpStatus.CONFLICT)
             .body(problem);
 }
 }

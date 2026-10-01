@@ -1,108 +1,257 @@
+#root {
+  width: 100%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f4f6f8;
+  font-family: Arial, Helvetica, sans-serif;
+  color: #1f2937;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
 
 .app {
-  min-height: 100vh;
-  background: #f3f6fb;
+  width: min(1100px, 94%);
+  margin: 0 auto;
+  padding: 32px 0 80px;
 }
 
 .header {
-  background: #173b68;
-  color: white;
-  padding: 24px 40px;
+  margin-bottom: 28px;
 }
 
 .header h1 {
   margin: 0;
-  font-size: 28px;
+  font-size: 36px;
 }
 
 .header p {
-  margin: 5px 0 0;
-  color: #d5e4f5;
+  margin-top: 6px;
+  color: #6b7280;
 }
 
-.container {
-  max-width: 480px;
-  margin: 60px auto;
+.panel {
   background: white;
-  padding: 35px;
   border-radius: 12px;
-  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.06);
+  padding: 24px;
+  margin-bottom: 20px;
+  border: 1px solid #e5e7eb;
 }
 
-.container h2 {
-  color: #173b68;
+.panel h2 {
   margin-top: 0;
 }
 
-.description {
-  color: #666;
-  margin-bottom: 30px;
+.form {
+  display: grid;
+  grid-template-columns:
+    repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
 }
 
-.form-group {
-  margin-bottom: 20px;
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
-label {
-  display: block;
-  margin-bottom: 8px;
+.field label {
   font-weight: 600;
 }
 
-input {
+input,
+select {
   width: 100%;
-  padding: 12px;
-  box-sizing: border-box;
+  padding: 11px 12px;
   border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  font-size: 15px;
+  border-radius: 7px;
+  background: white;
 }
 
-input:focus {
-  outline: 2px solid #3b82f6;
-  outline-offset: 1px;
+input:focus,
+select:focus {
+  outline: 2px solid #cbd5e1;
+  border-color: #64748b;
 }
 
 button {
-  width: 100%;
-  padding: 13px;
-  background: #173b68;
-  color: white;
   border: none;
-  border-radius: 6px;
-  font-size: 15px;
+  border-radius: 7px;
+  padding: 11px 18px;
   cursor: pointer;
+  background: #111827;
+  color: white;
+  font-weight: 600;
 }
 
 button:hover {
-  background: #24558a;
+  opacity: 0.9;
 }
 
-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+button.secondary {
+  background: #e5e7eb;
+  color: #111827;
+}
+
+.form button {
+  align-self: end;
+}
+
+.inline-form {
+  display: flex;
+  gap: 12px;
+  max-width: 500px;
+}
+
+.inline-form input,
+.inline-form select {
+  flex: 1;
 }
 
 .message {
-  margin-top: 20px;
-  padding: 12px;
-  background: #edf4ff;
-  border-radius: 6px;
+  padding: 14px 18px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  font-weight: 600;
+}
+
+.message.success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.message.error {
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 .field-error {
-  color: #dc2626;
+  color: #b91c1c;
   font-size: 13px;
-  margin-top: 6px;
 }
 
-@media (max-width: 600px) {
-  .header {
-    padding: 20px;
+.user-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.accounts-grid {
+  display: grid;
+  grid-template-columns:
+    repeat(auto-fit, minmax(300px, 1fr));
+  gap: 18px;
+}
+
+.account-card {
+  border: 1px solid #dbe2ea;
+  border-radius: 10px;
+  padding: 20px;
+}
+
+.account-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+}
+
+.currency {
+  font-weight: 700;
+  margin-right: 8px;
+}
+
+.balance {
+  font-size: 21px;
+}
+
+.status {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 20px;
+}
+
+.status.active {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status.blocked {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.account-number {
+  color: #64748b;
+  font-size: 13px;
+  word-break: break-all;
+  margin: 18px 0;
+}
+
+.account-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.transactions {
+  display: flex;
+  flex-direction: column;
+}
+
+.transaction {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 0;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.transaction div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.transaction div span {
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.transaction-amount {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.transaction-amount.deposit {
+  color: #15803d;
+}
+
+.transaction-amount.withdrawal {
+  color: #b91c1c;
+}
+
+@media (max-width: 750px) {
+
+  .form {
+    grid-template-columns: 1fr;
   }
 
-  .container {
-    margin: 24px 16px;
-    padding: 24px;
+  .inline-form {
+    flex-direction: column;
+  }
+
+  .account-header {
+    flex-direction: column;
   }
 }
